@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Products — Smart GST Billing</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><h2>🧾 GST Billing</h2><span>Compliance Engine</span></div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard"><span class="icon">📊</span> Dashboard</a>
+      <a href="/products"><span class="icon">📦</span> Products</a>
+      <a href="/customers"><span class="icon">👥</span> Customers</a>
+      <a href="/invoices"><span class="icon">🧾</span> Invoices</a>
+      <a href="/reports"><span class="icon">📈</span> Reports</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px;"><span id="sidebar-username">User</span></div>
+      <button class="logout-btn" onclick="logout()">↩ Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <h1>Products</h1>
+      <button class="btn btn-primary" onclick="openModal('product-modal')">+ Add Product</button>
+    </header>
+    <div class="page-body">
+      <div id="alert-area"></div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>HSN Code</th><th>Price</th><th>GST %</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="products-tbody">
+              <tr><td colspan="5" class="empty-state">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Modal -->
+<div class="modal-backdrop" id="product-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Add Product</h3>
+      <button class="modal-close" onclick="closeModal('product-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-id">
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Product Name</label>
+          <input type="text" id="p-name" placeholder="e.g. Laptop">
+        </div>
+        <div class="form-group">
+          <label>HSN Code</label>
+          <input type="text" id="p-hsn" placeholder="e.g. 8471">
+        </div>
+        <div class="form-group">
+          <label>Price (₹)</label>
+          <input type="number" id="p-price" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label>GST Rate (%)</label>
+          <select id="p-gst">
+            <option value="0">0%</option>
+            <option value="5">5%</option>
+            <option value="12">12%</option>
+            <option value="18" selected>18%</option>
+            <option value="28">28%</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('product-modal')">Cancel</button>
+      <button class="btn btn-primary" id="save-btn" onclick="saveProduct()">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  let products = [];
+
+  async function loadProducts() {
+    products = await api.get('/products');
+    const tbody = document.getElementById('products-tbody');
+    if (!products.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="icon">📦</div>No products yet. Add your first product.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = products.map(p => `
+      <tr>
+        <td><strong>${p.name}</strong></td>
+        <td><span class="badge badge-blue">${p.hsnCode}</span></td>
+        <td class="fw-bold">${formatCurrency(p.price)}</td>
+        <td><span class="badge badge-green">${p.gstPercentage}%</span></td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="editProduct(${p.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id})">Delete</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function editProduct(id) {
+    const p = products.find(x => x.id === id);
+    document.getElementById('edit-id').value = p.id;
+    document.getElementById('p-name').value  = p.name;
+    document.getElementById('p-hsn').value   = p.hsnCode;
+    document.getElementById('p-price').value = p.price;
+    document.getElementById('p-gst').value   = p.gstPercentage;
+    document.getElementById('modal-title').textContent = 'Edit Product';
+    openModal('product-modal');
+  }
+
+  async function saveProduct() {
+    const btn = document.getElementById('save-btn');
+    const id  = document.getElementById('edit-id').value;
+    const payload = {
+      name: document.getElementById('p-name').value.trim(),
+      hsnCode: document.getElementById('p-hsn').value.trim(),
+      price: parseFloat(document.getElementById('p-price').value),
+      gstPercentage: parseFloat(document.getElementById('p-gst').value),
+    };
+    setLoading(btn, true);
+    try {
+      id ? await api.put(`/products/${id}`, payload) : await api.post('/products', payload);
+      closeModal('product-modal');
+      showAlert('alert-area', id ? 'Product updated!' : 'Product created!', 'success');
+      document.getElementById('edit-id').value = '';
+      document.getElementById('modal-title').textContent = 'Add Product';
+      loadProducts();
+    } catch (err) {
+      showAlert('alert-area', err.message, 'danger');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  async function deleteProduct(id) {
+    if (!confirm('Delete this product?')) return;
+    try {
+      await api.delete(`/products/${id}`);
+      showAlert('alert-area', 'Product deleted.', 'success');
+      loadProducts();
+    } catch (err) {
+      showAlert('alert-area', err.message, 'danger');
+    }
+  }
+
+  loadProducts();
+</script>
+</body>
+</html>

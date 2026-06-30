@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoices — Smart GST Billing</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><h2>🧾 GST Billing</h2><span>Compliance Engine</span></div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard"><span class="icon">📊</span> Dashboard</a>
+      <a href="/products"><span class="icon">📦</span> Products</a>
+      <a href="/customers"><span class="icon">👥</span> Customers</a>
+      <a href="/invoices"><span class="icon">🧾</span> Invoices</a>
+      <a href="/reports"><span class="icon">📈</span> Reports</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px;"><span id="sidebar-username">User</span></div>
+      <button class="logout-btn" onclick="logout()">↩ Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <h1>Invoices</h1>
+      <button class="btn btn-primary" onclick="openCreateModal()">+ Create Invoice</button>
+    </header>
+    <div class="page-body">
+      <div id="alert-area"></div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Invoice #</th><th>Date</th><th>Customer</th>
+              <th class="text-right">Taxable</th>
+              <th class="text-right">Tax</th>
+              <th class="text-right">Total</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="invoices-tbody">
+              <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Invoice Modal -->
+<div class="modal-backdrop" id="invoice-modal">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">
+      <h3>Create Invoice</h3>
+      <button class="modal-close" onclick="closeModal('invoice-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Customer</label>
+        <select id="inv-customer"></select>
+      </div>
+
+      <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+        <strong style="font-size:13px;">Line Items</strong>
+        <button class="btn btn-outline btn-sm" onclick="addItemRow()">+ Add Item</button>
+      </div>
+      <div id="items-container"></div>
+
+      <!-- Live GST preview -->
+      <div id="gst-preview" style="background:#f8f9fa;border-radius:8px;padding:14px;margin-top:12px;display:none;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;gap:16px;flex-wrap:wrap;">
+          <span>Taxable: <strong id="prev-taxable">₹0.00</strong></span>
+          <span>CGST: <strong id="prev-cgst">₹0.00</strong></span>
+          <span>SGST: <strong id="prev-sgst">₹0.00</strong></span>
+          <span>IGST: <strong id="prev-igst">₹0.00</strong></span>
+          <span style="color:#0d6efd;">Total: <strong id="prev-total">₹0.00</strong></span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('invoice-modal')">Cancel</button>
+      <button class="btn btn-primary" id="create-btn" onclick="createInvoice()">Generate Invoice</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  let allProducts = [], allCustomers = [], allInvoices = [];
+
+  async function init() {
+    [allProducts, allCustomers, allInvoices] = await Promise.all([
+      api.get('/products'), api.get('/customers'), api.get('/invoices'),
+    ]);
+    renderInvoices();
+  }
+
+  function renderInvoices() {
+    const tbody = document.getElementById('invoices-tbody');
+    if (!allInvoices.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="icon">🧾</div>No invoices yet. Create one!</td></tr>';
+      return;
+    }
+    tbody.innerHTML = [...allInvoices].reverse().map(inv => {
+      const totalGst = parseFloat(inv.totalCgst||0)+parseFloat(inv.totalSgst||0)+parseFloat(inv.totalIgst||0);
+      return `<tr>
+        <td><span class="badge badge-blue">${inv.invoiceNumber}</span></td>
+        <td>${formatDate(inv.date)}</td>
+        <td>${inv.customerName}<br><small class="text-muted">${inv.customerState}</small></td>
+        <td class="text-right">${formatCurrency(inv.taxableAmount)}</td>
+        <td class="text-right text-green">${formatCurrency(totalGst)}</td>
+        <td class="text-right fw-bold">${formatCurrency(inv.totalAmount)}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="downloadPdf(${inv.id}, '${inv.invoiceNumber}')">
+            ⬇ PDF
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function openCreateModal() {
+    const sel = document.getElementById('inv-customer');
+    sel.innerHTML = '<option value="">Select customer...</option>' +
+      allCustomers.map(c => `<option value="${c.id}">${c.name} (${c.state})</option>`).join('');
+    document.getElementById('items-container').innerHTML = '';
+    document.getElementById('gst-preview').style.display = 'none';
+    addItemRow();
+    openModal('invoice-modal');
+  }
+
+  function addItemRow() {
+    const container = document.getElementById('items-container');
+    const row = document.createElement('div');
+    row.className = 'item-row';
+    row.innerHTML = `
+      <select class="item-product" onchange="previewGst()">
+        <option value="">Select product...</option>
+        ${allProducts.map(p => `<option value="${p.id}" data-price="${p.price}" data-gst="${p.gstPercentage}">${p.name} — ₹${p.price}</option>`).join('')}
+      </select>
+      <div>
+        <label style="font-size:11px;color:#6c757d;">Qty</label>
+        <input type="number" class="item-qty" value="1" min="1" style="width:70px;" oninput="previewGst()">
+      </div>
+      <button class="btn btn-danger btn-sm" style="align-self:end;" onclick="this.parentElement.remove(); previewGst()">✕</button>
+    `;
+    container.appendChild(row);
+  }
+
+  function previewGst() {
+    const rows = document.querySelectorAll('.item-row');
+    let taxable = 0, cgst = 0, sgst = 0, igst = 0;
+    const custSel = document.getElementById('inv-customer');
+    const custId = parseInt(custSel.value);
+    const cust = allCustomers.find(c => c.id === custId);
+    const sellerState = 'Maharashtra'; // matches app.business.state
+
+    rows.forEach(row => {
+      const pSel = row.querySelector('.item-product');
+      const qty  = parseInt(row.querySelector('.item-qty').value) || 1;
+      if (!pSel.value) return;
+      const price = parseFloat(pSel.selectedOptions[0].dataset.price) || 0;
+      const gstPct = parseFloat(pSel.selectedOptions[0].dataset.gst) || 0;
+      const base = price * qty;
+      const totalGst = base * gstPct / 100;
+      taxable += base;
+      if (cust && cust.state.toLowerCase() === sellerState.toLowerCase()) {
+        cgst += totalGst / 2;
+        sgst += totalGst / 2;
+      } else {
+        igst += totalGst;
+      }
+    });
+
+    const total = taxable + cgst + sgst + igst;
+    document.getElementById('prev-taxable').textContent = formatCurrency(taxable);
+    document.getElementById('prev-cgst').textContent    = formatCurrency(cgst);
+    document.getElementById('prev-sgst').textContent    = formatCurrency(sgst);
+    document.getElementById('prev-igst').textContent    = formatCurrency(igst);
+    document.getElementById('prev-total').textContent   = formatCurrency(total);
+    document.getElementById('gst-preview').style.display = 'block';
+  }
+
+  async function createInvoice() {
+    const btn = document.getElementById('create-btn');
+    const customerId = parseInt(document.getElementById('inv-customer').value);
+    if (!customerId) { showAlert('alert-area', 'Please select a customer.', 'danger'); return; }
+
+    const itemRows = document.querySelectorAll('.item-row');
+    const items = [];
+    for (const row of itemRows) {
+      const pId = parseInt(row.querySelector('.item-product').value);
+      const qty  = parseInt(row.querySelector('.item-qty').value);
+      if (pId && qty > 0) items.push({ productId: pId, quantity: qty });
+    }
+    if (!items.length) { showAlert('alert-area', 'Add at least one item.', 'danger'); return; }
+
+    setLoading(btn, true);
+    try {
+      const inv = await api.post('/invoices/create', { customerId, items });
+      closeModal('invoice-modal');
+      showAlert('alert-area', `Invoice ${inv.invoiceNumber} created!`, 'success');
+      allInvoices = await api.get('/invoices');
+      renderInvoices();
+    } catch (err) {
+      showAlert('alert-area', err.message, 'danger');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  // PDF download with auth header via fetch + blob
+  async function downloadPdf(invoiceId, invNum) {
+    try {
+      const res = await api.raw(`/invoices/${invoiceId}/pdf`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `invoice-${invNum}.pdf`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (err) {
+      showAlert('alert-area', 'PDF download failed: ' + err.message, 'danger');
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

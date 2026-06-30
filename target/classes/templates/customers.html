@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customers — Smart GST Billing</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><h2>🧾 GST Billing</h2><span>Compliance Engine</span></div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard"><span class="icon">📊</span> Dashboard</a>
+      <a href="/products"><span class="icon">📦</span> Products</a>
+      <a href="/customers"><span class="icon">👥</span> Customers</a>
+      <a href="/invoices"><span class="icon">🧾</span> Invoices</a>
+      <a href="/reports"><span class="icon">📈</span> Reports</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px;"><span id="sidebar-username">User</span></div>
+      <button class="logout-btn" onclick="logout()">↩ Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <h1>Customers</h1>
+      <button class="btn btn-primary" onclick="openAddModal()">+ Add Customer</button>
+    </header>
+    <div class="page-body">
+      <div id="alert-area"></div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>GSTIN</th><th>State</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="customers-tbody">
+              <tr><td colspan="4" class="empty-state">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-backdrop" id="customer-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Add Customer</h3>
+      <button class="modal-close" onclick="closeModal('customer-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-id">
+      <div class="form-group">
+        <label>Customer / Business Name</label>
+        <input type="text" id="c-name" placeholder="e.g. Raj Enterprises">
+      </div>
+      <div class="form-group">
+        <label>GSTIN <span class="text-muted">(leave blank if unregistered)</span></label>
+        <input type="text" id="c-gstin" placeholder="e.g. 27AABCU9603R1ZX" maxlength="15"
+               oninput="this.value=this.value.toUpperCase()">
+        <small class="text-muted">Format: 2-digit state code + PAN + 3 characters</small>
+      </div>
+      <div class="form-group">
+        <label>State</label>
+        <select id="c-state">
+          <option value="">Select state...</option>
+          <option>Andhra Pradesh</option><option>Arunachal Pradesh</option>
+          <option>Assam</option><option>Bihar</option><option>Chhattisgarh</option>
+          <option>Goa</option><option>Gujarat</option><option>Haryana</option>
+          <option>Himachal Pradesh</option><option>Jharkhand</option>
+          <option>Karnataka</option><option>Kerala</option>
+          <option>Madhya Pradesh</option><option selected>Maharashtra</option>
+          <option>Manipur</option><option>Meghalaya</option><option>Mizoram</option>
+          <option>Nagaland</option><option>Odisha</option><option>Punjab</option>
+          <option>Rajasthan</option><option>Sikkim</option><option>Tamil Nadu</option>
+          <option>Telangana</option><option>Tripura</option>
+          <option>Uttar Pradesh</option><option>Uttarakhand</option>
+          <option>West Bengal</option><option>Delhi</option>
+          <option>Jammu &amp; Kashmir</option><option>Ladakh</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('customer-modal')">Cancel</button>
+      <button class="btn btn-primary" id="save-btn" onclick="saveCustomer()">Save Customer</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  let customers = [];
+
+  function openAddModal() {
+    document.getElementById('edit-id').value = '';
+    document.getElementById('c-name').value  = '';
+    document.getElementById('c-gstin').value = '';
+    document.getElementById('c-state').value = '';
+    document.getElementById('modal-title').textContent = 'Add Customer';
+    openModal('customer-modal');
+  }
+
+  async function loadCustomers() {
+    customers = await api.get('/customers');
+    const tbody = document.getElementById('customers-tbody');
+    if (!customers.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="icon">👥</div>No customers yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = customers.map(c => `
+      <tr>
+        <td><strong>${c.name}</strong></td>
+        <td>${c.gstin ? `<span class="badge badge-green">${c.gstin}</span>` : '<span class="text-muted">—</span>'}</td>
+        <td>${c.state}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="editCustomer(${c.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCustomer(${c.id})">Delete</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function editCustomer(id) {
+    const c = customers.find(x => x.id === id);
+    document.getElementById('edit-id').value = c.id;
+    document.getElementById('c-name').value  = c.name;
+    document.getElementById('c-gstin').value = c.gstin || '';
+    document.getElementById('c-state').value = c.state;
+    document.getElementById('modal-title').textContent = 'Edit Customer';
+    openModal('customer-modal');
+  }
+
+  async function saveCustomer() {
+    const btn = document.getElementById('save-btn');
+    const id  = document.getElementById('edit-id').value;
+    const gstin = document.getElementById('c-gstin').value.trim();
+    const payload = {
+      name: document.getElementById('c-name').value.trim(),
+      gstin: gstin || null,
+      state: document.getElementById('c-state').value,
+    };
+    setLoading(btn, true);
+    try {
+      id ? await api.put(`/customers/${id}`, payload) : await api.post('/customers', payload);
+      closeModal('customer-modal');
+      showAlert('alert-area', id ? 'Customer updated!' : 'Customer created!', 'success');
+      loadCustomers();
+    } catch (err) {
+      showAlert('alert-area', err.message, 'danger');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  async function deleteCustomer(id) {
+    if (!confirm('Delete this customer?')) return;
+    try {
+      await api.delete(`/customers/${id}`);
+      showAlert('alert-area', 'Customer deleted.', 'success');
+      loadCustomers();
+    } catch (err) {
+      showAlert('alert-area', err.message, 'danger');
+    }
+  }
+
+  loadCustomers();
+</script>
+</body>
+</html>

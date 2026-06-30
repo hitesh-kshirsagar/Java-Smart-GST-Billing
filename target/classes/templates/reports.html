@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports — Smart GST Billing</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><h2>🧾 GST Billing</h2><span>Compliance Engine</span></div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard"><span class="icon">📊</span> Dashboard</a>
+      <a href="/products"><span class="icon">📦</span> Products</a>
+      <a href="/customers"><span class="icon">👥</span> Customers</a>
+      <a href="/invoices"><span class="icon">🧾</span> Invoices</a>
+      <a href="/reports"><span class="icon">📈</span> Reports</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:8px;"><span id="sidebar-username">User</span></div>
+      <button class="logout-btn" onclick="logout()">↩ Logout</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <h1>Monthly GST Report</h1>
+    </header>
+    <div class="page-body">
+
+      <!-- Filter -->
+      <div class="card mb-4" style="margin-bottom:20px;">
+        <div class="card-body" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+          <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+            <label>Month</label>
+            <select id="f-month">
+              <option value="1">January</option><option value="2">February</option>
+              <option value="3">March</option><option value="4">April</option>
+              <option value="5">May</option><option value="6">June</option>
+              <option value="7">July</option><option value="8">August</option>
+              <option value="9">September</option><option value="10">October</option>
+              <option value="11">November</option><option value="12">December</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;flex:1;min-width:120px;">
+            <label>Year</label>
+            <input type="number" id="f-year" value="2024" min="2020" max="2099">
+          </div>
+          <button class="btn btn-primary" onclick="loadReport()" style="margin-bottom:0;">
+            Generate Report
+          </button>
+        </div>
+      </div>
+
+      <!-- Summary cards -->
+      <div class="stats-grid" id="report-stats" style="display:none;">
+        <div class="stat-card">
+          <div class="label">Invoices</div>
+          <div class="value" id="r-count">0</div>
+        </div>
+        <div class="stat-card green">
+          <div class="label">Taxable Amount</div>
+          <div class="value" id="r-taxable">—</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="label">CGST</div>
+          <div class="value" id="r-cgst">—</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="label">SGST</div>
+          <div class="value" id="r-sgst">—</div>
+        </div>
+        <div class="stat-card red">
+          <div class="label">IGST</div>
+          <div class="value" id="r-igst">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Grand Total</div>
+          <div class="value" id="r-total">—</div>
+        </div>
+      </div>
+
+      <!-- Invoice table -->
+      <div class="card" id="report-table-card" style="display:none;">
+        <div class="card-header">
+          <h2 id="report-period-title">Invoice Details</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Invoice #</th><th>Date</th><th>Customer</th>
+              <th class="text-right">Taxable</th>
+              <th class="text-right">CGST</th>
+              <th class="text-right">SGST</th>
+              <th class="text-right">IGST</th>
+              <th class="text-right">Total</th>
+            </tr></thead>
+            <tbody id="report-tbody"></tbody>
+            <tfoot id="report-tfoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+
+  // Pre-select current month/year
+  const now = new Date();
+  document.getElementById('f-month').value = now.getMonth() + 1;
+  document.getElementById('f-year').value  = now.getFullYear();
+
+  async function loadReport() {
+    const month = document.getElementById('f-month').value;
+    const year  = document.getElementById('f-year').value;
+    try {
+      const r = await api.get(`/invoices/report?month=${month}&year=${year}`);
+
+      document.getElementById('r-count').textContent   = r.invoiceCount;
+      document.getElementById('r-taxable').textContent = formatCurrency(r.totalTaxableAmount);
+      document.getElementById('r-cgst').textContent    = formatCurrency(r.totalCgst);
+      document.getElementById('r-sgst').textContent    = formatCurrency(r.totalSgst);
+      document.getElementById('r-igst').textContent    = formatCurrency(r.totalIgst);
+      document.getElementById('r-total').textContent   = formatCurrency(r.grandTotal);
+      document.getElementById('report-period-title').textContent = r.period + ' — Invoice Details';
+      document.getElementById('report-stats').style.display = '';
+      document.getElementById('report-table-card').style.display = '';
+
+      const tbody = document.getElementById('report-tbody');
+      if (!r.invoices.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No invoices in this period.</td></tr>';
+        document.getElementById('report-tfoot').innerHTML = '';
+        return;
+      }
+      tbody.innerHTML = r.invoices.map(inv => `
+        <tr>
+          <td><span class="badge badge-blue">${inv.invoiceNumber}</span></td>
+          <td>${formatDate(inv.date)}</td>
+          <td>${inv.customerName}</td>
+          <td class="text-right">${formatCurrency(inv.taxableAmount)}</td>
+          <td class="text-right">${formatCurrency(inv.totalCgst)}</td>
+          <td class="text-right">${formatCurrency(inv.totalSgst)}</td>
+          <td class="text-right">${formatCurrency(inv.totalIgst)}</td>
+          <td class="text-right fw-bold">${formatCurrency(inv.totalAmount)}</td>
+        </tr>`).join('');
+
+      // Totals row
+      document.getElementById('report-tfoot').innerHTML = `
+        <tr style="background:#f0f2f5;font-weight:700;border-top:2px solid #dee2e6;">
+          <td colspan="3">TOTALS</td>
+          <td class="text-right">${formatCurrency(r.totalTaxableAmount)}</td>
+          <td class="text-right">${formatCurrency(r.totalCgst)}</td>
+          <td class="text-right">${formatCurrency(r.totalSgst)}</td>
+          <td class="text-right">${formatCurrency(r.totalIgst)}</td>
+          <td class="text-right" style="color:#0d6efd;">${formatCurrency(r.grandTotal)}</td>
+        </tr>`;
+    } catch (err) {
+      alert('Error loading report: ' + err.message);
+    }
+  }
+
+  // Load current month on page open
+  loadReport();
+</script>
+</body>
+</html>
